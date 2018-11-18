@@ -34,8 +34,10 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <pwd.h>
 #include <tls.h>
 
+#define GOP_USER "nobody" 
 #define GOP_PORT 70
 #define GOP_TLS_PORT 343
 #define GOP_HOST "localhost"
@@ -48,10 +50,31 @@
 struct tls_config *tlscfg;
 struct tls *ctx;
 
+uid_t uid;
+gid_t gid;
+
 static void 
 sigchild_handler(int signum) 
 {
 	waitpid(WAIT_ANY, NULL, WNOHANG);
+}
+
+static int
+drop_p()
+{
+	errno = 0;
+	struct passwd  *upasswd;
+	if ((upasswd = getpwnam(GOP_USER)) == NULL)
+		errx(1, "Couldn't find user %s", GOP_USER);
+	if (setgid(upasswd->pw_gid) == -1)
+		errx(1, "Couldn't set GID");
+	if (setgroups(0, NULL) == -1)
+		errx(1, "Could not remove other groups");
+	if (setuid(upasswd->pw_uid) == -1)
+		errx(1, "Could not set UID");
+	if (getuid() == 0)
+		errx(1, "GOP_USER cannot be root!");	
+	return 0;
 }
 
 int
@@ -61,7 +84,10 @@ main(int argc, char *argv[])
 	struct sockaddr_in server_sa, gop;
 	struct sigaction sa;
 	u_short port;
-
+	
+	if ((GOP_TLS_PORT < 1024) && (getuid() != 0))
+		errx(1, "Privileged port %u requires a privileged user!", 
+				GOP_TLS_PORT);
 	sd = socket( PF_INET, SOCK_STREAM, 0 );
 	if (tls_init() == -1)
 		err(1, "tls_init() failed");
@@ -92,7 +118,7 @@ main(int argc, char *argv[])
 	sa.sa_flags = SA_RESTART;
 	if (sigaction(SIGCHLD, &sa, NULL) == -1)
 		err(1, "sigaction failed");
-
+	drop_p();
 	printf("Geomys listening on %s:%u\n", GOP_HOST, port);
 	for(;;) {
 		int gop_sd;
