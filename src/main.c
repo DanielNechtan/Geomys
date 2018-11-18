@@ -43,12 +43,17 @@
 #define GOP_HOST "localhost"
 #define CRLF "\n\r"
 
+#define MAXREQ 100
+#define BUFLEN 1024
+
 #define TLS_CA "/etc/ssl/cert.pem"
 #define TLS_CERT "geomys.pem"
 #define TLS_KEY "geomys.key"
 
 struct tls_config *tlscfg;
 struct tls *ctx;
+struct tls *cctx;	
+static struct pollfd poll_fd[MAXREQ];
 
 uid_t uid;
 gid_t gid;
@@ -84,6 +89,8 @@ main(int argc, char *argv[])
 	struct sockaddr_in server_sa, gop;
 	struct sigaction sa;
 	u_short port;
+	char buffer[128];
+	size_t maxread;
 	
 	if ((GOP_TLS_PORT < 1024) && (getuid() != 0))
 		errx(1, "Privileged port %u requires a privileged user!", 
@@ -121,12 +128,39 @@ main(int argc, char *argv[])
 	drop_p();
 	printf("Geomys listening on %s:%u\n", GOP_HOST, port);
 	for(;;) {
-		int gop_sd;
+		int gop_sd, i;
 		gop_len = sizeof(&gop);
 		if ((gop_sd = accept(sd, (struct sockaddr *)&gop, 
 					&gop_len)) == -1)
 			err(1, "Cannot accept connection");
+		if (tls_accept_socket(ctx, &cctx, gop_sd) == -1)
+			errx(1, "Cannot accept tls  (%s)", tls_error(ctx));
+		do {
+			if ((i = tls_handshake(cctx)) == -1)
+				errx(1, "Cannot handshake (%s)", 
+					tls_error(cctx));
+		} while (i == TLS_WANT_POLLIN || i == TLS_WANT_POLLOUT);
+		
+	/*	memset(poll_fd, 0, sizeof(poll_fd));
+		poll_fd[0].fd = 
+		*/
+		ssize_t r = -1;
+		ssize_t rc = 0;
+		maxread = sizeof(buffer) - 1;
+		while ((r != 0) && rc < maxread) {
+			r = tls_read(cctx, buffer + rc, maxread - rc);
+			if (r == TLS_WANT_POLLIN || r == TLS_WANT_POLLOUT)
+				continue;
+			if (r < 0) {
+				errx(1, "tls_read failed (%s)", 
+					tls_error(cctx));
+			} else
+				rc += r;
+		}
+		buffer[rc] = '\0';
+		printf("<<  %s",buffer);
+		close(gop_sd);
 
-		/* serve gopher */
+/* serve gopher */
 	}
 }
