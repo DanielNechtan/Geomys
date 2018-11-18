@@ -67,7 +67,7 @@ static int
 drop_p()
 {
 	errno = 0;
-	struct passwd  *upasswd;
+	struct passwd *upasswd;
 	if ((upasswd = getpwnam(GOP_USER)) == NULL)
 		errx(1, "Couldn't find user %s", GOP_USER);
 	if (setgid(upasswd->pw_gid) == -1)
@@ -78,6 +78,20 @@ drop_p()
 		errx(1, "Could not set UID");
 	if (getuid() == 0)
 		errx(1, "GOP_USER cannot be root!");	
+
+char *pledgefest = "stdio rpath wpath cpath \
+tmppath inet dns fattr flock \
+unix getpw sendfd recvfd tty error";
+
+        if (unveil("/tmp", "rcw") == -1)
+                err(1, "unveil");
+        if (unveil("/etc/hosts", "r") == -1)
+                err(1, "unveil");
+        if (unveil("/etc/resolv.conf", "r") == -1)
+                err(1, "unveil");
+        if (pledge(pledgefest, NULL) == -1)
+                 err(1, "pledge");
+
 	return 0;
 }
 
@@ -99,10 +113,8 @@ handle_req(struct tls *fd)
 	ssize_t maxread;
 	char buf[128];
 	maxread = sizeof(buf) - 1;
-	printf("handle_req()\n");
 	while ((r != 0) && rc < maxread) {
 		r = tls_read(fd, buf + rc, maxread - rc);
-/*		printf("tls_read: %s", buf); */
 	        if(r <= 0){
             		buf[rc] = 0;
 			break;
