@@ -57,8 +57,8 @@ sigchild_handler(int signum)
 int
 main(int argc, char *argv[])
 {
-	int sd;
-	struct sockaddr_in server_sa;
+	int sd, gop_len;
+	struct sockaddr_in server_sa, gop;
 	struct sigaction sa;
 	u_short port;
 
@@ -95,6 +95,12 @@ main(int argc, char *argv[])
 
 	printf("Geomys listening on %s:%u\n", GOP_HOST, port);
 	for(;;) {
+		int gop_sd;
+		gop_len = sizeof(&gop);
+		if ((gop_sd = accept(sd, (struct sockaddr *)&gop, 
+					&gop_len)) == -1)
+			err(1, "Cannot accept connection");
+
 		/* serve gopher */
 	}
 }
