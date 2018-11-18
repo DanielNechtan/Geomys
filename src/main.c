@@ -52,8 +52,7 @@
 
 struct tls_config *tlscfg;
 struct tls *ctx;
-struct tls *cctx;	
-static struct pollfd poll_fd[MAXREQ];
+struct tls *cctx;
 
 uid_t uid;
 gid_t gid;
@@ -82,10 +81,49 @@ drop_p()
 	return 0;
 }
 
+int 
+crlf_foo( char * buf, size_t size ){
+    char * pos = memchr(buf, '\n', size);
+    if( pos != NULL ){
+        *(pos-1) = 0;
+        return 1;
+    }
+    return 0;
+}
+
+void
+handle_req(struct tls *fd)
+{
+	ssize_t r = -1;
+	ssize_t rc = 0;
+	ssize_t maxread;
+	char buf[128];
+	maxread = sizeof(buf) - 1;
+	printf("handle_req()\n");
+	while ((r != 0) && rc < maxread) {
+		r = tls_read(fd, buf + rc, maxread - rc);
+/*		printf("tls_read: %s", buf); */
+	        if(r <= 0){
+            		buf[rc] = 0;
+			break;
+		}
+/*		if (r == TLS_WANT_POLLIN || r == TLS_WANT_POLLOUT)
+ *			continue;
+ */		if (r < 0)
+			warnx("tls_read failed (%s)", 
+				tls_error(cctx));
+		rc += r;
+		if (crlf_foo(buf, rc))
+			break;
+	}
+	buf[rc] = '\0';
+	printf("<< %s\n", buf);
+}
+
 int
 main(int argc, char *argv[])
 {
-	int sd, gop_len;
+	int sd, gop_len, i;
 	struct sockaddr_in server_sa, gop;
 	struct sigaction sa;
 	u_short port;
@@ -110,57 +148,49 @@ main(int argc, char *argv[])
 	if (tls_configure(ctx, tlscfg) == -1)
 		errx(1, "tls_configure failed (%s)", tls_error(ctx));
 	port = GOP_TLS_PORT;
+
 	memset(&server_sa, 0, sizeof(server_sa));
 	server_sa.sin_family = AF_INET;
 	server_sa.sin_port = htons(port);
 	server_sa.sin_addr.s_addr = htonl(INADDR_ANY);
-	
+
 	if (bind(sd, (struct sockaddr *) &server_sa, 
 			sizeof(server_sa)) == -1)
 		err(1, "Cannot bind()");
-	if (listen(sd,3) == -1)
+	if (listen(sd, MAXREQ) == -1)
 		err(1, "Cannot listen()");
+	if (setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &i, sizeof(int)) == -1)
+		err(1, "Cannot setsockopt()");
+
 	sa.sa_handler = sigchild_handler;
         sigemptyset(&sa.sa_mask);
 	sa.sa_flags = SA_RESTART;
 	if (sigaction(SIGCHLD, &sa, NULL) == -1)
 		err(1, "sigaction failed");
 	drop_p();
+
 	printf("Geomys listening on %s:%u\n", GOP_HOST, port);
+
 	for(;;) {
 		int gop_sd, i;
 		gop_len = sizeof(&gop);
-		if ((gop_sd = accept(sd, (struct sockaddr *)&gop, 
-					&gop_len)) == -1)
-			err(1, "Cannot accept connection");
+		if ((gop_sd = accept(sd, 
+			(struct sockaddr *)&gop, &gop_len)) == -1)
+				 err(1, "Cannot accept connection");
 		if (tls_accept_socket(ctx, &cctx, gop_sd) == -1)
 			errx(1, "Cannot accept tls  (%s)", tls_error(ctx));
 		do {
 			if ((i = tls_handshake(cctx)) == -1)
-				errx(1, "Cannot handshake (%s)", 
+				warnx("Cannot handshake (%s)", 
 					tls_error(cctx));
 		} while (i == TLS_WANT_POLLIN || i == TLS_WANT_POLLOUT);
-		
-	/*	memset(poll_fd, 0, sizeof(poll_fd));
-		poll_fd[0].fd = 
-		*/
-		ssize_t r = -1;
-		ssize_t rc = 0;
-		maxread = sizeof(buffer) - 1;
-		while ((r != 0) && rc < maxread) {
-			r = tls_read(cctx, buffer + rc, maxread - rc);
-			if (r == TLS_WANT_POLLIN || r == TLS_WANT_POLLOUT)
-				continue;
-			if (r < 0) {
-				errx(1, "tls_read failed (%s)", 
-					tls_error(cctx));
-			} else
-				rc += r;
-		}
-		buffer[rc] = '\0';
-		printf("<<  %s",buffer);
-		close(gop_sd);
 
-/* serve gopher */
+		struct tls *req_fd = malloc(sizeof(cctx));
+		req_fd = cctx;
+		printf("New connection: %s\n", inet_ntoa(gop.sin_addr));
+		handle_req(req_fd);
+		
+		tls_close(cctx);
+		close(gop_sd);
 	}
 }
