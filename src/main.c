@@ -128,8 +128,18 @@ handle_req(struct tls *fd)
 		if (crlf_foo(buf, rc))
 			break;
 	}
-	buf[rc] = '\0';
-	printf("<< %s\n", buf);
+/*	buf[rc] = '\0';i */
+	printf("<< [%s]\n", buf);
+	if (buf != "qq"){ 
+		ssize_t w = 0;
+		ssize_t wr = 0;
+		char *wbuf;
+		wbuf = "0Welcome\tCGX:Welcome\tlocalhost\t343\r\n.\r\n";
+/*		while (wr < strlen(wbuf)) { */
+			w = tls_write(fd, wbuf + wr,
+				    strlen(wbuf) - wr);
+	/*	}	*/
+	}
 }
 
 int
